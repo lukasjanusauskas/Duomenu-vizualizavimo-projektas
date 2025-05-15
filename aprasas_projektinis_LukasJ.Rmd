@@ -1,0 +1,39 @@
+---
+title: "aprasas_projektinis_LukasJ"
+output: pdf_document
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+```
+
+
+```{r}
+df_migration <- read.csv('cb858a73-d257-41a1-a31c-5b8e74b6f0c2_Data.csv')
+df_migration %>% 
+  rename('geo' = 'Country.Origin.Code',
+         'gender' = 'Migration.by.Gender.Code',
+         'dest' = 'Country.Dest.Code',
+         'migrants' = 'X2000..2000.') %>% 
+  select(c('geo', 'gender', 'dest', 'migrants'))
+
+df_empl <- read.csv('oecd_employment.csv')
+View(head(df_empl))
+```
+
+OECD imprtuototos laiko eilutės buvo sezoniškai ir kalendoriškai pataiasytos: iš laiko eilučių 
+pašalintas sezoniškumas ir kalendoriniai efektai.
+
+```{r}
+df_empl <- df_empl %>% 
+  rename('geo' = 'REF_AREA',
+         'value' = 'OBS_VALUE') %>% 
+  select(c('geo', 'Measure', 'value')) %>% 
+  pivot_wider(names_from = 'Measure', values_from = 'value')
+
+prcomp( df_empl[, c(2:ncol(df_empl))] )
+
+
+```
+
