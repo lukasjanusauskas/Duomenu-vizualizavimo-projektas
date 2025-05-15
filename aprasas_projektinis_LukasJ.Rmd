@@ -6,34 +6,63 @@ output: pdf_document
 ```{r}
 library(tidyr)
 library(dplyr)
+library(mice)
+library(rnaturalearth)
+library(rnaturalearthdata)
 ```
 
 
 ```{r}
 df_migration <- read.csv('cb858a73-d257-41a1-a31c-5b8e74b6f0c2_Data.csv')
-df_migration %>% 
+df_migration <- df_migration %>% 
   rename('geo' = 'Country.Origin.Code',
          'gender' = 'Migration.by.Gender.Code',
          'dest' = 'Country.Dest.Code',
          'migrants' = 'X2000..2000.') %>% 
   select(c('geo', 'gender', 'dest', 'migrants'))
-
-df_empl <- read.csv('oecd_employment.csv')
-View(head(df_empl))
 ```
 
 OECD imprtuototos laiko eilutės buvo sezoniškai ir kalendoriškai pataiasytos: iš laiko eilučių 
 pašalintas sezoniškumas ir kalendoriniai efektai.
 
 ```{r}
+df_empl <- read.csv('oecd_employment.csv')
+
 df_empl <- df_empl %>% 
   rename('geo' = 'REF_AREA',
          'value' = 'OBS_VALUE') %>% 
   select(c('geo', 'Measure', 'value')) %>% 
+  filter(Measure != "Labour force participation rate") %>% 
   pivot_wider(names_from = 'Measure', values_from = 'value')
-
-prcomp( df_empl[, c(2:ncol(df_empl))] )
-
-
 ```
 
+
+```{r}
+df_gdp <- read.csv('gdp-per-capita-worldbank.csv')
+df_gdp <- df_gdp %>% 
+  filter(Year == "2000") %>% 
+  rename('geo' = 'Code',
+         'gdp_per_cap' = 'GDP.per.capita..PPP..constant.2021.international...') %>% 
+  select(c('geo', 'gdp_per_cap'))
+```
+
+```{r}
+countries_df <- df_gdp %>% 
+  inner_join(ne_countries(), by = join_by("geo" == "iso_a3")) %>% 
+  select(c('geo', 'gdp_per_cap', 'subregion')) %>% 
+  inner_join(df_empl, by = join_by("geo"))
+
+migration_df <- df_empl %>% 
+  full_join(df_gdp, by = join_by("geo")) %>% 
+  full_join(df_migration, by = join_by("geo"))
+```
+
+```{r}
+raw_data <- select(countries_df, -c('geo', 'subregion')) 
+imp <- mice(raw_data, m=1, method = c("pmm"))
+
+data_raw <- complete(imp)
+
+pr_comps <- prcomp(data_raw)
+importances <- summary(pr_comps)[["importance"]]['Proportion of Variance',]
+```
