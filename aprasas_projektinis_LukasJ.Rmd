@@ -1,68 +1,299 @@
 ---
-title: "aprasas_projektinis_LukasJ"
+title: "Projektinis darbas"
 output: pdf_document
 ---
 
-```{r}
+```{r, include=FALSE}
 library(tidyr)
 library(dplyr)
 library(mice)
+library(lubridate)
 library(rnaturalearth)
 library(rnaturalearthdata)
+library(eurostat)
+library(countrycode)
+library(knitr)
+library(ggplot2)
+library(ggstream)
 ```
 
+\begin{center}
+\includegraphics[width=0.5\textwidth]{vu_logo.png}\vspace{1cm}
 
-```{r}
-df_migration <- read.csv('cb858a73-d257-41a1-a31c-5b8e74b6f0c2_Data.csv')
-df_migration <- df_migration %>% 
-  rename('geo' = 'Country.Origin.Code',
-         'gender' = 'Migration.by.Gender.Code',
-         'dest' = 'Country.Dest.Code',
-         'migrants' = 'X2000..2000.') %>% 
-  select(c('geo', 'gender', 'dest', 'migrants'))
-```
+{
+  \Large
+  Vilniaus universitetas\\
+  Matematikos ir Informatikos fakultetas\\
+  Duomenų mokslas, II kursas
+}
+  \par
+          
+  \vspace{3.5cm}
+  
+  Lukas Janušauskas
+  \par
+          
+  \textbf{\large Europos švietimo rodiklių analizė}\vspace{0.8cm}
+  \par
+          
+  Projektinis duomenų vizualizavimo projektas \vfill
+      
+  2020 gegužė
+\end{center}
 
-OECD imprtuototos laiko eilutės buvo sezoniškai ir kalendoriškai pataiasytos: iš laiko eilučių 
-pašalintas sezoniškumas ir kalendoriniai efektai.
+\pagebreak
 
-```{r}
-df_empl <- read.csv('oecd_employment.csv')
+## Tikslas
 
-df_empl <- df_empl %>% 
+Ištirti švietimo rodiklius Europos šalyse: skirtumus tarp Europos regionų, 
+mokytojų darbo krūvio ir algų, skirtingų pasiskirstymų.
+
+## Užduotys
+
+1. Pavaizduoti duomenis, pasitelkiant PCA.
+2. Ištirti PCA komponenčių scree plot.
+3. Ištirti laiko, praleisto mokantis, pasiskirtymą Europoje.
+4. Ištirti studentų stojimo procento pasiskirtymą Europoje.
+
+## Duomenys
+
+Duomenų šaltiniai:
+
+1. **EUROSTAT**. Naudotas mokinių, tenkančių vienam mokytojui rodiklis.
+2. **OECD**. Naudotas mokytojų algų rodiklis ir stojimo procentas.
+3. **ourworldindata**. Naudotas vidutinis metų skaičius, skirtas mokslui.
+
+| Stulpelis | Reikšmė | Tipas |
+| --- | --- | --- |
+| `geo` | ISO 3 simbolių šalies kodas | `chr` |
+| `student_teach_ratio` | Studentų, tenkančių vienam mokytojui vidurkis  | `numeric` |
+| `schooling` | Vidutinis skaičius metų, kuriuos skiria mokslui | `numeric` |
+| `enrollment` | Procentas stoajnčiųjų į bakalauro programas | `numeric` |
+| `teacher_pa` | Mokytojų alga | `numeric` |
+| `subregion` | Europos regionas | `chr` |
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+schooling <- read.csv('data/expected-years-of-schooling.csv')
+schooling <- schooling %>% 
+  rename(schooling = 'Expected.years.of.schooling',
+         geo = 'Code') %>% 
+  filter(Year == 2022, geo != "") %>% 
+  select(c('geo', 'schooling'))
+
+ratio_st <- get_eurostat('educ_uoe_perp04')
+ratio_st <- ratio_st %>% 
+  filter(isced11 == 'ED2',
+         TIME_PERIOD == '2022-01-01') %>% 
+  mutate(geo = countrycode(geo, 'eurostat', 'iso3c')) %>% 
+  rename('student_teach_ratio' = 'values') %>% 
+  select(c('geo', 'student_teach_ratio'))
+  
+
+students <- read.csv('data/oecd_students.csv')
+students <- students %>% 
+  filter(INST_TYPE_EDU == 'INST_EDU_PUB',
+         EDUCATION_LEV == 'ISCED11_6') %>% 
+  rename("enrollment" = "OBS_VALUE",
+         "geo" = 'REF_AREA') %>% 
+  select(c('geo', 'enrollment'))
+
+teach_pay <- read.csv('data/oecd_teachers.csv')
+teach_pay <- teach_pay %>% 
   rename('geo' = 'REF_AREA',
-         'value' = 'OBS_VALUE') %>% 
-  select(c('geo', 'Measure', 'value')) %>% 
-  filter(Measure != "Labour force participation rate") %>% 
-  pivot_wider(names_from = 'Measure', values_from = 'value')
-```
+         'teacher_pay' = 'OBS_VALUE') %>% 
+  filter(PERS_TYPE == 'TE',
+         EDUCATION_LEV == 'ISCED11_24',
+         REF_PERIOD == 2022) %>% 
+  select(c('geo', 'teacher_pay'))
 
+df <- ratio_st %>% 
+  inner_join(schooling, by=join_by('geo')) %>% 
+  inner_join(students, by=join_by('geo')) %>% 
+  inner_join(teach_pay, by=join_by('geo'))
 
-```{r}
-df_gdp <- read.csv('gdp-per-capita-worldbank.csv')
-df_gdp <- df_gdp %>% 
-  filter(Year == "2000") %>% 
-  rename('geo' = 'Code',
-         'gdp_per_cap' = 'GDP.per.capita..PPP..constant.2021.international...') %>% 
-  select(c('geo', 'gdp_per_cap'))
-```
+cols <- c(colnames(df), 'subregion')
 
-```{r}
-countries_df <- df_gdp %>% 
-  inner_join(ne_countries(), by = join_by("geo" == "iso_a3")) %>% 
-  select(c('geo', 'gdp_per_cap', 'subregion')) %>% 
-  inner_join(df_empl, by = join_by("geo"))
-
-migration_df <- df_empl %>% 
-  full_join(df_gdp, by = join_by("geo")) %>% 
-  full_join(df_migration, by = join_by("geo"))
+df <- df %>% 
+  inner_join(ne_countries(), by=join_by("geo" == "iso_a3")) %>% 
+  select(cols)
 ```
 
 ```{r}
-raw_data <- select(countries_df, -c('geo', 'subregion')) 
-imp <- mice(raw_data, m=1, method = c("pmm"))
-
-data_raw <- complete(imp)
-
-pr_comps <- prcomp(data_raw)
-importances <- summary(pr_comps)[["importance"]]['Proportion of Variance',]
+kable(head(df))
 ```
+
+\pagebreak
+
+## PCA
+
+### SVD ir scree plot
+
+Trumpai prsitatysiu PCA, kad galėtumėte suprasti sekančius punktus.
+Pakete, kurį naudojau, pagrindinių komponenčių analizė buvo implementuota, naudojant singular value decomposition. 
+Kiti, modernesni, pasirinkimai buvo t-SNE ir UMAP, tačiau duomenų kiekis nebuvo didelis, todėl naudojau SVD.
+
+
+Tegu mūsų reikšmės bus matrica $X$, tada ši matrica faktorizuojama pagal formulę:
+
+\begin{equation}
+  X = U\Sigma V^T
+\end{equation}
+
+Čia $U$, $V$ - matricos sudarytos iš kairiųjų ir dešiniųjų tikrinių vektorių (angl. left and right singtular vectors),
+$\Sigma$ - diagonalinė matrica, sudaryta iš kairiųjų ir dešiniųjų tikrinių reikšmių (angl. eigenvalues). Šis metodas yra geresnis už kanoninę formą $U \Lambda U^{-1}$ tuo, kad reikalavimai matricai $X$ yra žymiai lankstesni.
+
+**Svarbus faktas** - $\Sigma$ pagrindinėje įstrižainėje esančios tikrinės reikšmės(jų šaknys)
+atitinka paaiškintą dispersiją. Tiriant PCA, dažnai šios dispersijos yra tiriamos, norint nustatyti, kiek komponenčių užteks. Tai pavaizduosiu vadinamu scree plot.
+
+
+Duomenų paruošimui reikia imputuoti praleistus duomenis. Kadangi duomenyse negali 
+būti praleistų reikšmių, naudosiu CART algoritmą (medžiais paremtą ML-modelį), iš
+paketo `mice`.
+
+```{r}
+raw_data <- select(df, -c('geo', 'subregion'))
+
+imp <- mice(raw_data, method="cart")
+pr_comp_data <- complete(imp)
+
+pr_comp_res <- prcomp(pr_comp_data)
+```
+
+### Scree plot
+
+Toliau, paprasčiausiai naudojantis paketu `stats` pasinaudojau `prcomp`.
+Prieš jungiant pagrinines komponentes su duomenimis, nusibrėžkime scree plot ištirti
+komponenčių tikrines reikšmes, kurios kaip žinome atstoja paaiškintą dispersiją.
+
+```{r}
+eigenvalues <- pr_comp_res$sdev ^ 2
+
+expl_var <- eigenvalues / sum(eigenvalues) * 100
+
+plot_data <-   data.frame(
+    Komponente = 1:length(eigenvalues),
+    `Tikrine reiksme` = eigenvalues,
+    expl_var = expl_var
+)
+
+ggplot(plot_data) +
+    geom_line(aes(x = Komponente, y = expl_var),
+               size=2, color="#78003F") +
+    geom_point(aes(x = Komponente, y = expl_var),
+               size=5, color="#E64164") +
+    labs(
+      title = "Scree plot",
+      x = "Komponentės nr.",
+      y = "Paaiškinta dispersija (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+```
+
+### PCA iliustracija
+
+```{r}
+pr_comp_decomp <- pr_comp_res[['x']]
+
+df_pca <- cbind(df, pr_comp_decomp)
+
+df_pca %>% 
+  ggplot() +
+    geom_point(aes(x=PC1, y=PC2, color=subregion),
+               size=6, alpha=0.75) +
+    scale_color_manual(values=colorRampPalette(c("#4164e6", "#64e641", "#e64164"))(5),
+                       name="Regionas") + 
+    theme_minimal() +
+    ggtitle("Pagrindinių komponenčių sklaidos diagrama") +
+    theme(
+      text = element_text(family = "sans"),
+      plot.title = element_text(size = 16, face = "bold", hjust = 0),
+      plot.subtitle = element_text(size = 12, hjust = 0, margin = margin(b = 20)),
+      axis.title = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 10),
+      legend.title = element_text(size = 10, face = "bold"),
+      legend.text = element_text(size = 9),
+      legend.position = "right",
+      plot.margin = margin(t = 20, r = 20, b = 20, l = 20),
+      panel.grid.minor = element_blank()
+    ) +
+    labs(
+      subtitle = "Pagrindinės komponentės ir Europos regionai",
+      x = "Komponentė nr. 1",
+      y = "Komponentė nr. 2"
+    )
+```
+
+Kaip matome, Vakarų ir Rytų Europa išsiskiria, tačiau skirtumo tarp 
+Šiaurės ir Pietų Europos pagrindines kopmonentės iš mano išrinktų duomenų neatskiria.
+
+### Streamgraph
+
+
+
+```{r}
+ratio_st <- get_eurostat('educ_uoe_perp04')
+ratio_st <- ratio_st %>% 
+  filter(isced11 == 'ED2') %>% 
+  mutate(geo = countrycode(geo, 'eurostat', 'iso3c')) %>% 
+  rename('student_teach_ratio' = 'values') %>% 
+  select(c('geo', 'TIME_PERIOD', 'student_teach_ratio')) %>% 
+  drop_na()
+
+ratio_st %>% 
+  inner_join(ne_countries(), by=join_by("geo" == "iso_a3")) %>% 
+  select(c(colnames(ratio_st), 'subregion')) %>% 
+  filter(sapply(subregion, function(x) grepl('Europe', x))) %>% 
+  group_by(subregion, TIME_PERIOD) %>% 
+  summarize(
+    mean_val = mean(student_teach_ratio)
+  ) %>% 
+  ggplot(aes(x = TIME_PERIOD, y = mean_val, fill = subregion)) +
+    scale_fill_manual(values=colorRampPalette(c("#003f78", "#ff3da1"))(4),
+                       name="Regionas:") + 
+    geom_stream(type="proportional") +
+  labs(
+    title = "Mokinio / mokytojui santykio pasiskirstymas Europoje",
+    x = "Metai",
+    y = ""
+  ) +
+  theme_minimal(base_size = 14, base_family = "Lato") +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 14, hjust = 0.5, margin = margin(b = 10)),
+    axis.title = element_text(size = 13),
+    axis.text = element_text(size = 11, color = "gray20"),
+    axis.text.y = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size=12, face="bold"),
+    legend.text = element_text(size=10),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+
+```
+
+### Interaktyvus žemėlapis
+
+```{r}
+
+```
+
+\pagebreak
+
+## Bibliografija
+
+https://math.mit.edu/classes/18.095/2016IAP/lec2/SVD_Notes.pdf
+
+
+
